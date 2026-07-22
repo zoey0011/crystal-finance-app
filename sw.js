@@ -1,4 +1,4 @@
-const CACHE_NAME = "crystal-finance-v3";
+const CACHE_NAME = "crystal-finance-v4";
 const ASSETS = ["./", "./index.html", "./styles.css", "./xlsx.full.min.js", "./app.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {

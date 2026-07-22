@@ -1,7 +1,12 @@
 const STORAGE_KEY = "crystal_finance_v1";
 const CLOUD_KEY = "crystal_finance_cloud_v1";
+const AUTO_SYNC_DELAY = 1200;
+const AUTO_PULL_INTERVAL = 60000;
 
 const state = loadState();
+let syncTimer = null;
+let syncing = false;
+let pendingSync = false;
 const titles = {
   dashboard: "总览",
   products: "商品",
@@ -43,9 +48,10 @@ function loadState() {
   }
 }
 
-function saveState() {
+function saveState(options = {}) {
   state.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (!options.skipAutoSync) scheduleAutoSync();
 }
 
 function cloudConfig() {
@@ -58,6 +64,24 @@ function cloudConfig() {
 
 function saveCloudConfig(cfg) {
   localStorage.setItem(CLOUD_KEY, JSON.stringify(cfg));
+}
+
+function hasCloudConfig() {
+  const cfg = cloudConfig();
+  return Boolean(cfg.url && cfg.key && cfg.storeCode);
+}
+
+function setSyncStatus(text) {
+  const el = $("#syncStatus");
+  if (el) el.textContent = text;
+}
+
+function scheduleAutoSync() {
+  if (!hasCloudConfig()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncCloud({ silent: true }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
+  }, AUTO_SYNC_DELAY);
 }
 
 function productById(id) {
@@ -519,29 +543,46 @@ async function cloudRequest(method, url, key, body) {
   return res.status === 204 ? null : res.json();
 }
 
-async function syncCloud() {
-  const cfg = cloudConfig();
-  if (!cfg.url || !cfg.key || !cfg.storeCode) {
-    $("#syncStatus").textContent = "还没有填写云同步设置。";
-    $(`.tabbar button[data-view="settings"]`).click();
+async function syncCloud(options = {}) {
+  if (syncing) {
+    pendingSync = true;
     return;
   }
-  $("#syncStatus").textContent = "正在同步...";
-  const base = `${cfg.url.replace(/\/$/, "")}/rest/v1/crystal_finance_data`;
-  const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
-  const remote = await cloudRequest("GET", query, cfg.key);
-  const remoteRow = remote?.[0];
-  if (remoteRow?.data && new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
-    Object.assign(state, remoteRow.data);
+  const cfg = cloudConfig();
+  if (!cfg.url || !cfg.key || !cfg.storeCode) {
+    if (!options.silent) {
+      setSyncStatus("还没有填写云同步设置。");
+      $(`.tabbar button[data-view="settings"]`).click();
+    }
+    return;
   }
-  saveState();
-  await cloudRequest("POST", `${base}?on_conflict=store_code`, cfg.key, {
-    store_code: cfg.storeCode,
-    data: state,
-    updated_at: state.updatedAt
-  });
-  renderAll();
-  $("#syncStatus").textContent = `同步完成：${new Date().toLocaleString("zh-CN")}`;
+  syncing = true;
+  if (!options.silent) setSyncStatus("正在同步...");
+  try {
+    const base = `${cfg.url.replace(/\/$/, "")}/rest/v1/crystal_finance_data`;
+    const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
+    const remote = await cloudRequest("GET", query, cfg.key);
+    const remoteRow = remote?.[0];
+    if (remoteRow?.data && new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
+      Object.assign(state, remoteRow.data);
+      saveState({ skipAutoSync: true });
+    } else {
+      saveState({ skipAutoSync: true });
+    }
+    await cloudRequest("POST", `${base}?on_conflict=store_code`, cfg.key, {
+      store_code: cfg.storeCode,
+      data: state,
+      updated_at: state.updatedAt
+    });
+    renderAll();
+    setSyncStatus(`同步完成：${new Date().toLocaleString("zh-CN")}`);
+  } finally {
+    syncing = false;
+    if (pendingSync) {
+      pendingSync = false;
+      scheduleAutoSync();
+    }
+  }
 }
 
 function bindCloud() {
@@ -555,14 +596,33 @@ function bindCloud() {
       key: $("#supabaseKey").value.trim(),
       storeCode: $("#storeCode").value.trim()
     });
-    $("#syncStatus").textContent = "同步设置已保存。";
-  });
-  $("#syncBtn").addEventListener("click", () => {
-    syncCloud().catch(err => {
-      $("#syncStatus").textContent = "同步失败，请检查 Supabase 表和 Key。";
+    setSyncStatus("同步设置已保存，正在做第一次同步...");
+    syncCloud({ silent: true }).catch(err => {
+      setSyncStatus("第一次同步失败，请检查 Supabase 表和 Key。");
       alert(`同步失败：${err.message.slice(0, 180)}`);
     });
   });
+  $("#syncBtn").addEventListener("click", () => {
+    syncCloud().catch(err => {
+      setSyncStatus("同步失败，请检查 Supabase 表和 Key。");
+      alert(`同步失败：${err.message.slice(0, 180)}`);
+    });
+  });
+}
+
+function bindAutoSync() {
+  if (hasCloudConfig()) {
+    setTimeout(() => syncCloud({ silent: true }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。")), 800);
+  }
+  window.addEventListener("focus", () => {
+    if (hasCloudConfig()) syncCloud({ silent: true }).catch(() => {});
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && hasCloudConfig()) syncCloud({ silent: true }).catch(() => {});
+  });
+  setInterval(() => {
+    if (hasCloudConfig() && !document.hidden) syncCloud({ silent: true }).catch(() => {});
+  }, AUTO_PULL_INTERVAL);
 }
 
 function seedIfEmpty() {
@@ -589,5 +649,6 @@ bindActions();
 bindBackup();
 bindHftImport();
 bindCloud();
+bindAutoSync();
 renderAll();
 registerSW();
