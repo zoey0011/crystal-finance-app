@@ -540,7 +540,8 @@ async function cloudRequest(method, url, key, body) {
     body: body ? JSON.stringify(body) : undefined
   });
   if (!res.ok) throw new Error(await res.text());
-  return res.status === 204 ? null : res.json();
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
 }
 
 async function syncCloud(options = {}) {
