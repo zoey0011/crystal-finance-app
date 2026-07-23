@@ -603,7 +603,7 @@ async function syncCloud(options = {}) {
       });
       localStorage.removeItem(DIRTY_KEY);
       renderAll();
-      setSyncStatus(syncTimeText("已上传本机数据"));
+      setSyncStatus(syncTimeText("已写入云端"));
       return;
     }
     const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
