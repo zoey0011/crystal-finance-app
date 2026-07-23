@@ -100,7 +100,7 @@ function scheduleAutoSync() {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     syncCloud({ silent: true, push: hasUnsyncedLocalChange }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
-  }, AUTO_SYNC_DELAY);
+  }, hasUnsyncedLocalChange ? 0 : AUTO_SYNC_DELAY);
 }
 
 function isStarterProduct(p) {
@@ -604,6 +604,11 @@ async function syncCloud(options = {}) {
       hasUnsyncedLocalChange = false;
       renderAll();
       setSyncStatus(syncTimeText("已写入云端"));
+      return;
+    }
+    if (hasUnsyncedLocalChange) {
+      setSyncStatus("本机有刚保存的数据，正在等待自动上传，已暂停拉取云端。");
+      scheduleAutoSync();
       return;
     }
     const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
