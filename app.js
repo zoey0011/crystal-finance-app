@@ -54,6 +54,10 @@ function saveState(options = {}) {
   if (!options.skipAutoSync) scheduleAutoSync();
 }
 
+function persistState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
 function cloudConfig() {
   try {
     const cfg = JSON.parse(localStorage.getItem(CLOUD_KEY) || "{}");
@@ -93,7 +97,7 @@ function scheduleAutoSync() {
   if (!hasCloudConfig()) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    syncCloud({ silent: true }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
+    syncCloud({ silent: true, push: true }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
   }, AUTO_SYNC_DELAY);
 }
 
@@ -597,18 +601,23 @@ async function syncCloud(options = {}) {
     if (remoteRow?.data) {
       if ((!localHasData && remoteHasData) || new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
         Object.assign(state, remoteRow.data);
-        saveState({ skipAutoSync: true });
+        persistState();
         renderAll();
         setSyncStatus(syncTimeText("已从云端拉取数据"));
         return;
-      } else {
-        saveState({ skipAutoSync: true });
+      } else if (!options.push) {
+        setSyncStatus(syncTimeText("已检查，无新数据"));
+        return;
       }
     } else {
-      saveState({ skipAutoSync: true });
+      persistState();
     }
     if (!localHasData && remoteHasData) {
       setSyncStatus("本机没有真实数据，已停止上传以避免覆盖云端。");
+      return;
+    }
+    if (!options.push && remoteRow?.data) {
+      setSyncStatus(syncTimeText("已检查，无新数据"));
       return;
     }
     await cloudRequest("POST", `${base}?on_conflict=store_code`, cfg.key, {
@@ -639,13 +648,13 @@ function bindCloud() {
       storeCode: $("#storeCode").value.trim()
     });
     setSyncStatus("同步设置已保存，正在做第一次同步...");
-    syncCloud({ silent: true }).catch(err => {
+    syncCloud({ silent: true, push: false }).catch(err => {
       setSyncStatus("第一次同步失败，请检查 Supabase 表和 Key。");
       alert(`同步失败：${err.message.slice(0, 180)}`);
     });
   });
   $("#syncBtn").addEventListener("click", () => {
-    syncCloud().catch(err => {
+    syncCloud({ push: true }).catch(err => {
       setSyncStatus("同步失败，请检查 Supabase 表和 Key。");
       alert(`同步失败：${err.message.slice(0, 180)}`);
     });
@@ -654,16 +663,16 @@ function bindCloud() {
 
 function bindAutoSync() {
   if (hasCloudConfig()) {
-    setTimeout(() => syncCloud({ silent: true }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。")), 800);
+    setTimeout(() => syncCloud({ silent: true, push: false }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。")), 800);
   }
   window.addEventListener("focus", () => {
-    if (hasCloudConfig()) syncCloud({ silent: true }).catch(() => {});
+    if (hasCloudConfig()) syncCloud({ silent: true, push: false }).catch(() => {});
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && hasCloudConfig()) syncCloud({ silent: true }).catch(() => {});
+    if (!document.hidden && hasCloudConfig()) syncCloud({ silent: true, push: false }).catch(() => {});
   });
   setInterval(() => {
-    if (hasCloudConfig() && !document.hidden) syncCloud({ silent: true }).catch(() => {});
+    if (hasCloudConfig() && !document.hidden) syncCloud({ silent: true, push: false }).catch(() => {});
   }, AUTO_PULL_INTERVAL);
 }
 
