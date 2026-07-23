@@ -56,14 +56,23 @@ function saveState(options = {}) {
 
 function cloudConfig() {
   try {
-    return JSON.parse(localStorage.getItem(CLOUD_KEY) || "{}");
+    const cfg = JSON.parse(localStorage.getItem(CLOUD_KEY) || "{}");
+    return normalizeCloudConfig(cfg);
   } catch {
     return {};
   }
 }
 
 function saveCloudConfig(cfg) {
-  localStorage.setItem(CLOUD_KEY, JSON.stringify(cfg));
+  localStorage.setItem(CLOUD_KEY, JSON.stringify(normalizeCloudConfig(cfg)));
+}
+
+function normalizeCloudConfig(cfg = {}) {
+  return {
+    url: String(cfg.url || "").trim().replace(/\s+/g, "").replace(/\/+$/, ""),
+    key: String(cfg.key || "").trim().replace(/\s+/g, ""),
+    storeCode: String(cfg.storeCode || "").trim()
+  };
 }
 
 function hasCloudConfig() {
@@ -564,9 +573,14 @@ async function syncCloud(options = {}) {
     const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
     const remote = await cloudRequest("GET", query, cfg.key);
     const remoteRow = remote?.[0];
-    if (remoteRow?.data && new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
-      Object.assign(state, remoteRow.data);
-      saveState({ skipAutoSync: true });
+    const isLocalEmpty = !state.products.length && !state.purchases.length && !state.sales.length && !state.expenses.length;
+    if (remoteRow?.data) {
+      if (isLocalEmpty || new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
+        Object.assign(state, remoteRow.data);
+        saveState({ skipAutoSync: true });
+      } else {
+        saveState({ skipAutoSync: true });
+      }
     } else {
       saveState({ skipAutoSync: true });
     }
