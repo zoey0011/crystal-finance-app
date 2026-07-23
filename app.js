@@ -1,6 +1,5 @@
 const STORAGE_KEY = "crystal_finance_v1";
 const CLOUD_KEY = "crystal_finance_cloud_v1";
-const DIRTY_KEY = "crystal_finance_dirty_v1";
 const AUTO_SYNC_DELAY = 1200;
 const AUTO_PULL_INTERVAL = 10000;
 
@@ -8,6 +7,7 @@ const state = loadState();
 let syncTimer = null;
 let syncing = false;
 let pendingSync = false;
+let hasUnsyncedLocalChange = false;
 const titles = {
   dashboard: "总览",
   products: "商品",
@@ -52,7 +52,7 @@ function loadState() {
 function saveState(options = {}) {
   state.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  if (!options.skipAutoSync) localStorage.setItem(DIRTY_KEY, "1");
+  if (!options.skipAutoSync) hasUnsyncedLocalChange = true;
   if (!options.skipAutoSync) scheduleAutoSync();
 }
 
@@ -99,7 +99,7 @@ function scheduleAutoSync() {
   if (!hasCloudConfig()) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    syncCloud({ silent: true, push: localStorage.getItem(DIRTY_KEY) === "1" }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
+    syncCloud({ silent: true, push: hasUnsyncedLocalChange }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
   }, AUTO_SYNC_DELAY);
 }
 
@@ -601,7 +601,7 @@ async function syncCloud(options = {}) {
         data: state,
         updated_at: state.updatedAt
       });
-      localStorage.removeItem(DIRTY_KEY);
+      hasUnsyncedLocalChange = false;
       renderAll();
       setSyncStatus(syncTimeText("已写入云端"));
       return;
@@ -644,7 +644,7 @@ function bindCloud() {
     });
   });
   $("#syncBtn").addEventListener("click", () => {
-    syncCloud({ push: true }).catch(err => {
+    syncCloud({ push: false }).catch(err => {
       setSyncStatus("同步失败，请检查 Supabase 表和 Key。");
       alert(`同步失败：${err.message.slice(0, 180)}`);
     });
