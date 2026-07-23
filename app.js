@@ -8,6 +8,7 @@ let syncTimer = null;
 let syncing = false;
 let pendingSync = false;
 let hasUnsyncedLocalChange = false;
+let localChangeVersion = 0;
 const titles = {
   dashboard: "总览",
   products: "商品",
@@ -52,7 +53,10 @@ function loadState() {
 function saveState(options = {}) {
   state.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  if (!options.skipAutoSync) hasUnsyncedLocalChange = true;
+  if (!options.skipAutoSync) {
+    hasUnsyncedLocalChange = true;
+    localChangeVersion += 1;
+  }
   if (!options.skipAutoSync) scheduleAutoSync();
 }
 
@@ -594,6 +598,7 @@ async function syncCloud(options = {}) {
   syncing = true;
   if (!options.silent) setSyncStatus("正在同步...");
   try {
+    const startVersion = localChangeVersion;
     const base = `${cfg.url.replace(/\/$/, "")}/rest/v1/crystal_finance_data`;
     if (options.push) {
       await cloudRequest("POST", `${base}?on_conflict=store_code`, cfg.key, {
@@ -602,6 +607,7 @@ async function syncCloud(options = {}) {
         updated_at: state.updatedAt
       });
       hasUnsyncedLocalChange = false;
+      localChangeVersion = startVersion;
       renderAll();
       setSyncStatus(syncTimeText("已写入云端"));
       return;
@@ -614,6 +620,11 @@ async function syncCloud(options = {}) {
     const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
     const remote = await cloudRequest("GET", query, cfg.key);
     const remoteRow = remote?.[0];
+    if (hasUnsyncedLocalChange || localChangeVersion !== startVersion) {
+      setSyncStatus("检测到本机刚保存的数据，已取消本次云端覆盖。");
+      scheduleAutoSync();
+      return;
+    }
     if (remoteRow?.data) {
       Object.assign(state, remoteRow.data);
       persistState();
