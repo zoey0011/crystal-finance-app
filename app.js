@@ -1,5 +1,6 @@
 const STORAGE_KEY = "crystal_finance_v1";
 const CLOUD_KEY = "crystal_finance_cloud_v1";
+const DIRTY_KEY = "crystal_finance_dirty_v1";
 const AUTO_SYNC_DELAY = 1200;
 const AUTO_PULL_INTERVAL = 10000;
 
@@ -51,6 +52,7 @@ function loadState() {
 function saveState(options = {}) {
   state.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (!options.skipAutoSync) localStorage.setItem(DIRTY_KEY, "1");
   if (!options.skipAutoSync) scheduleAutoSync();
 }
 
@@ -97,7 +99,7 @@ function scheduleAutoSync() {
   if (!hasCloudConfig()) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    syncCloud({ silent: true, push: true }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
+    syncCloud({ silent: true, push: localStorage.getItem(DIRTY_KEY) === "1" }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
   }, AUTO_SYNC_DELAY);
 }
 
@@ -593,40 +595,28 @@ async function syncCloud(options = {}) {
   if (!options.silent) setSyncStatus("正在同步...");
   try {
     const base = `${cfg.url.replace(/\/$/, "")}/rest/v1/crystal_finance_data`;
+    if (options.push) {
+      await cloudRequest("POST", `${base}?on_conflict=store_code`, cfg.key, {
+        store_code: cfg.storeCode,
+        data: state,
+        updated_at: state.updatedAt
+      });
+      localStorage.removeItem(DIRTY_KEY);
+      renderAll();
+      setSyncStatus(syncTimeText("已上传本机数据"));
+      return;
+    }
     const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
     const remote = await cloudRequest("GET", query, cfg.key);
     const remoteRow = remote?.[0];
-    const localHasData = hasRealLocalData();
-    const remoteHasData = hasRemoteData(remoteRow?.data);
     if (remoteRow?.data) {
-      if ((!localHasData && remoteHasData) || new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
-        Object.assign(state, remoteRow.data);
-        persistState();
-        renderAll();
-        setSyncStatus(syncTimeText("已从云端拉取数据"));
-        return;
-      } else if (!options.push) {
-        setSyncStatus(syncTimeText("已检查，无新数据"));
-        return;
-      }
-    } else {
+      Object.assign(state, remoteRow.data);
       persistState();
-    }
-    if (!localHasData && remoteHasData) {
-      setSyncStatus("本机没有真实数据，已停止上传以避免覆盖云端。");
+      renderAll();
+      setSyncStatus(syncTimeText("已按云端数据刷新"));
       return;
     }
-    if (!options.push && remoteRow?.data) {
-      setSyncStatus(syncTimeText("已检查，无新数据"));
-      return;
-    }
-    await cloudRequest("POST", `${base}?on_conflict=store_code`, cfg.key, {
-      store_code: cfg.storeCode,
-      data: state,
-      updated_at: state.updatedAt
-    });
-    renderAll();
-    setSyncStatus(syncTimeText("同步完成"));
+    setSyncStatus("云端暂无数据，请先在主设备保存一条记录或手动同步。");
   } finally {
     syncing = false;
     if (pendingSync) {
