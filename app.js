@@ -1,7 +1,7 @@
 const STORAGE_KEY = "crystal_finance_v1";
 const CLOUD_KEY = "crystal_finance_cloud_v1";
 const AUTO_SYNC_DELAY = 1200;
-const AUTO_PULL_INTERVAL = 60000;
+const AUTO_PULL_INTERVAL = 10000;
 
 const state = loadState();
 let syncTimer = null;
@@ -85,12 +85,31 @@ function setSyncStatus(text) {
   if (el) el.textContent = text;
 }
 
+function syncTimeText(action = "同步完成") {
+  return `${action}：${new Date().toLocaleString("zh-CN")}（自动检查间隔约 10 秒）`;
+}
+
 function scheduleAutoSync() {
   if (!hasCloudConfig()) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     syncCloud({ silent: true }).catch(() => setSyncStatus("自动同步失败，请检查网络或同步设置。"));
   }, AUTO_SYNC_DELAY);
+}
+
+function isStarterProduct(p) {
+  return ["SP001", "SP002", "SP003"].includes(p.code) && !num(p.openingQty) && !num(p.openingAmount);
+}
+
+function hasRealLocalData() {
+  const realProducts = state.products.filter(p => !isStarterProduct(p));
+  return Boolean(realProducts.length || state.purchases.length || state.sales.length || state.expenses.length);
+}
+
+function hasRemoteData(data) {
+  if (!data) return false;
+  const products = Array.isArray(data.products) ? data.products.filter(p => !isStarterProduct(p)) : [];
+  return Boolean(products.length || data.purchases?.length || data.sales?.length || data.expenses?.length);
 }
 
 function productById(id) {
@@ -370,7 +389,7 @@ function bindBackup() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `水晶店财务备份_${today()}.json`;
+    a.download = `有个小村财务备份_${today()}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -573,16 +592,24 @@ async function syncCloud(options = {}) {
     const query = `${base}?store_code=eq.${encodeURIComponent(cfg.storeCode)}&select=*`;
     const remote = await cloudRequest("GET", query, cfg.key);
     const remoteRow = remote?.[0];
-    const isLocalEmpty = !state.products.length && !state.purchases.length && !state.sales.length && !state.expenses.length;
+    const localHasData = hasRealLocalData();
+    const remoteHasData = hasRemoteData(remoteRow?.data);
     if (remoteRow?.data) {
-      if (isLocalEmpty || new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
+      if ((!localHasData && remoteHasData) || new Date(remoteRow.updated_at) > new Date(state.updatedAt || 0)) {
         Object.assign(state, remoteRow.data);
         saveState({ skipAutoSync: true });
+        renderAll();
+        setSyncStatus(syncTimeText("已从云端拉取数据"));
+        return;
       } else {
         saveState({ skipAutoSync: true });
       }
     } else {
       saveState({ skipAutoSync: true });
+    }
+    if (!localHasData && remoteHasData) {
+      setSyncStatus("本机没有真实数据，已停止上传以避免覆盖云端。");
+      return;
     }
     await cloudRequest("POST", `${base}?on_conflict=store_code`, cfg.key, {
       store_code: cfg.storeCode,
@@ -590,7 +617,7 @@ async function syncCloud(options = {}) {
       updated_at: state.updatedAt
     });
     renderAll();
-    setSyncStatus(`同步完成：${new Date().toLocaleString("zh-CN")}`);
+    setSyncStatus(syncTimeText("同步完成"));
   } finally {
     syncing = false;
     if (pendingSync) {
@@ -641,13 +668,7 @@ function bindAutoSync() {
 }
 
 function seedIfEmpty() {
-  if (state.products.length) return;
-  state.products.push(
-    { id: uid(), code: "SP001", name: "白水晶手串", spec: "8mm", cost: 35, openingQty: 0, openingAmount: 0 },
-    { id: uid(), code: "SP002", name: "紫水晶吊坠", spec: "银扣", cost: 58, openingQty: 0, openingAmount: 0 },
-    { id: uid(), code: "SP003", name: "黄水晶摆件", spec: "约300g", cost: 120, openingQty: 0, openingAmount: 0 }
-  );
-  saveState();
+  return;
 }
 
 function registerSW() {
@@ -656,7 +677,6 @@ function registerSW() {
   }
 }
 
-seedIfEmpty();
 setDefaults();
 bindForms();
 bindNav();

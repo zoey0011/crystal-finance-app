@@ -1,7 +1,7 @@
 {
-  "name": "水晶店财务助手",
-  "short_name": "财务助手",
-  "description": "适合水晶店手机和平板使用的进货、销售、开支、库存和利润记录工具。",
+  "name": "有个小村 · 财务助手",
+  "short_name": "有个小村",
+  "description": "有个小村水晶店手机和平板使用的进货、销售、开支、库存和利润记录工具。",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f6f4ff",
